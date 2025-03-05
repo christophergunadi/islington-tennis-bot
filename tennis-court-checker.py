@@ -9,6 +9,15 @@ import requests
 import telegram
 from dotenv import load_dotenv
 
+MONDAY = 0
+TUESDAY = 1
+WEDNESDAY = 2
+THURSDAY = 3
+FRIDAY = 4
+SATURDAY = 5
+SUNDAY = 6
+
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -20,9 +29,14 @@ class TennisCourtChecker:
         self.telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
         # Constants
-        self.time_filter_enabled = False
-        self.start_time = datetime.strptime("08:00", "%H:%M")
-        self.end_time = datetime.strptime("23:00", "%H:%M")
+        self.itc_filter_enabled = False
+        self.itc_days_to_filter = [MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY, SUNDAY]
+        self.itc_start_time = datetime.strptime("08:00", "%H:%M")
+        self.itc_end_time = datetime.strptime("23:00", "%H:%M")
+        self.highbury_filter_enabled = True
+        self.highbury_days_to_filter = [SATURDAY, SUNDAY]
+        self.highbury_start_time = datetime.strptime("08:00", "%H:%M")
+        self.highbury_end_time = datetime.strptime("23:00", "%H:%M")
         self.refresh_period = 15
         self.simplified_notification_text_enabled = True
 
@@ -71,13 +85,26 @@ class TennisCourtChecker:
             "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         }
 
-    def is_time_slot_allowed(self, time_slot):
+    def is_time_slot_allowed(self, slot):
         try:
-            if not self.time_filter_enabled:
-                return True
+            venue = slot.get("name", "")
+            date = slot.get("date", "")
+            day_dt = datetime.strptime(date, "%Y-%m-%d").weekday()
+            time_slot = slot.get("starts_at", {}).get("format_24_hour", "00:00")
             time_slot_dt = datetime.strptime(time_slot, "%H:%M")
-            return self.start_time <= time_slot_dt < self.end_time
 
+            # self.logger.info(f"Checking {venue} for {date}, {day_dt} at {time_slot_dt}")
+
+            if venue == "Highbury Fields Tennis":
+                if not self.highbury_filter_enabled:
+                    return True
+                return day_dt in self.highbury_days_to_filter and self.highbury_start_time <= time_slot_dt < self.highbury_end_time    
+
+
+            if venue == "Tennis Court - Indoor":
+                if not self.itc_filter_enabled:
+                    return True
+                return day_dt in self.itc_days_to_filter and self.itc_start_time <= time_slot_dt < self.itc_end_time    
         except ValueError:
             return False
 
@@ -95,18 +122,14 @@ class TennisCourtChecker:
                     slot
                     for slot in data
                     if slot.get("spaces", 0) > 0
-                    and self.is_time_slot_allowed(
-                        slot.get("starts_at", {}).get("format_24_hour", "00:00")
-                    )
+                    and self.is_time_slot_allowed(slot)
                 ]
             elif isinstance(data, dict):
                 available_slots = [
                     slot
                     for _, slot in data.items()
                     if slot.get("spaces", 0) > 0
-                    and self.is_time_slot_allowed(
-                        slot.get("starts_at", {}).get("format_24_hour", "00:00")
-                    )
+                    and self.is_time_slot_allowed(slot)
                 ]
             # self.logger.info(f"Slots for  {date}: {available_slots}")
             return available_slots
@@ -236,7 +259,7 @@ class TennisCourtChecker:
                     )
 
                     for slot in new_slots:
-                        await self.send_telegram_notification(readable_date, slot)
+                        # await self.send_telegram_notification(readable_date, slot)
                         previous_available_slots[check_date].add(
                             self.extract_key_from_slot(slot)
                         )
